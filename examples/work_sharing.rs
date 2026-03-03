@@ -1,5 +1,5 @@
-//! This example is used to stress test the current implementation and is mirrored in
-//! `tests/correctness_test.rs`.
+//! This example is used to stress test the current implementation and is
+//! mirrored in `tests/correctness_test.rs`.
 
 use bimodal_array::{BimodalArrayError, ElementHandle, bimodal_array};
 use std::sync::atomic::Ordering as AtomicOrdering;
@@ -31,7 +31,7 @@ fn worker(pause: Arc<AtomicBool>, mut element: ElementHandle<usize>) {
 }
 
 fn main() {
-    let (mut array_handle, element_handles) = bimodal_array(vec![0usize; WORKER_COUNT]).unwrap();
+    let (mut array_handle, element_handles) = bimodal_array(vec![0usize; WORKER_COUNT]);
     let pause = Arc::new(AtomicBool::new(false));
     let threads: Vec<_> = element_handles
         .into_iter()

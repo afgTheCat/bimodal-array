@@ -1,6 +1,6 @@
 use bimodal_array::BimodalArrayError;
 use bimodal_array::ElementHandle;
-use bimodal_array::bimodal_array;
+use bimodal_array::try_bimodal_array;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
@@ -36,7 +36,7 @@ fn array_handle_is_send_but_not_sync_for_cell() {
 #[test]
 fn array_lock_fails_while_element_active() {
     let data = vec![0u32];
-    let (mut array_handle, mut elements) = bimodal_array(data).unwrap();
+    let (mut array_handle, mut elements) = try_bimodal_array(data).unwrap();
     let mut element = elements.pop().unwrap();
 
     let (ready_tx, ready_rx) = mpsc::channel::<()>();
@@ -61,7 +61,7 @@ fn array_lock_fails_while_element_active() {
 #[test]
 fn element_lock_fails_while_array_lock_active() {
     let data = vec![0u32];
-    let (mut array_handle, mut elements) = bimodal_array(data).unwrap();
+    let (mut array_handle, mut elements) = try_bimodal_array(data).unwrap();
     let mut elements = elements.pop().unwrap();
 
     let _array = array_handle.lock().unwrap();
@@ -99,7 +99,7 @@ fn make_drop_items(len: usize) -> (Arc<AtomicUsize>, Vec<DropItem>) {
 #[test]
 fn drop_array_handle_while_element_lock_held_other_handles_exist() {
     let (drops, data) = make_drop_items(4);
-    let (array_handle, mut element_handles) = bimodal_array(data).unwrap();
+    let (array_handle, mut element_handles) = try_bimodal_array(data).unwrap();
 
     let mut element = element_handles.pop().unwrap();
     let guard = element.lock().unwrap();
@@ -118,7 +118,7 @@ fn drop_array_handle_while_element_lock_held_other_handles_exist() {
 #[test]
 fn drop_element_handles_while_array_lock_held() {
     let (drops, data) = make_drop_items(5);
-    let (mut array_handle, element_handles) = bimodal_array(data).unwrap();
+    let (mut array_handle, element_handles) = try_bimodal_array(data).unwrap();
 
     let guard = array_handle.lock().unwrap();
 
@@ -133,7 +133,7 @@ fn drop_element_handles_while_array_lock_held() {
 #[test]
 fn drop_other_element_handles_while_element_lock_held() {
     let (drops, data) = make_drop_items(2);
-    let (array_handle, mut element_handles) = bimodal_array(data).unwrap();
+    let (array_handle, mut element_handles) = try_bimodal_array(data).unwrap();
 
     let mut element = element_handles.pop().unwrap();
     let guard = element.lock().unwrap();
@@ -175,7 +175,7 @@ fn worker(pause: Arc<AtomicBool>, mut element: ElementHandle<usize>) {
 
 #[test]
 fn stress_element_locks_with_periodic_array_lock() {
-    let (mut array_handle, element_handles) = bimodal_array(vec![0usize; ELEMENTS]).unwrap();
+    let (mut array_handle, element_handles) = try_bimodal_array(vec![0usize; ELEMENTS]).unwrap();
 
     let pause = Arc::new(AtomicBool::new(false));
     let threads: Vec<_> = element_handles
@@ -208,4 +208,14 @@ fn stress_element_locks_with_periodic_array_lock() {
     threads.into_iter().for_each(|t| t.join().unwrap());
     let guard = array_handle.lock().unwrap();
     assert!(guard.iter().all(|&v| v == ITERS_PER_ELEMENT));
+}
+
+#[test]
+fn contrived_unsupported_length() {
+    let data = vec![(); usize::MAX];
+    let unsupported_length_error = try_bimodal_array(data);
+    assert!(matches!(
+        unsupported_length_error,
+        Err(BimodalArrayError::UnsupportedLength)
+    ));
 }
