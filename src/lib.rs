@@ -282,6 +282,18 @@ impl<'a, T> Deref for ElementGuard<'a, T> {
     }
 }
 
+impl<'a, T> AsRef<T> for ElementGuard<'a, T> {
+    fn as_ref(&self) -> &T {
+        self.deref()
+    }
+}
+
+impl<'a, T> AsMut<T> for ElementGuard<'a, T> {
+    fn as_mut(&mut self) -> &mut T {
+        self.deref_mut()
+    }
+}
+
 impl<'a, T> DerefMut for ElementGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { self.data_ptr.as_mut() }
@@ -387,6 +399,18 @@ impl<'a, T> Deref for ArrayGuard<'a, T> {
 impl<'a, T> DerefMut for ArrayGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { slice::from_raw_parts_mut(self.data_ptr.as_ptr(), self.len) }
+    }
+}
+
+impl<'a, T> AsRef<[T]> for ArrayGuard<'a, T> {
+    fn as_ref(&self) -> &[T] {
+        self.deref()
+    }
+}
+
+impl<'a, T> AsMut<[T]> for ArrayGuard<'a, T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        self.deref_mut()
     }
 }
 

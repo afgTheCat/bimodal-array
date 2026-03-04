@@ -64,4 +64,3 @@ for t in threads {
 let mut array_guard = array_handle.lock().unwrap();
 array_guard.sort();
 ```
-```
