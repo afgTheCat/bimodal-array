@@ -211,6 +211,57 @@ fn stress_element_locks_with_periodic_array_lock() {
 }
 
 #[test]
+fn lock_map_holds_array_lock_until_mapped_view_drops() {
+    struct WithRef<'a> {
+        value: &'a u32,
+    }
+
+    let (mut array_handle, mut element_handles) = try_bimodal_array(vec![7u32]).unwrap();
+    let mut element = element_handles.pop().unwrap();
+
+    let (failed_tx, failed_rx) = mpsc::channel::<()>();
+    let (done_tx, done_rx) = mpsc::channel::<usize>();
+
+    let t = thread::spawn(move || {
+        let mut failures = 0usize;
+        let mut reported_failure = false;
+
+        loop {
+            match element.lock() {
+                Ok(guard) => {
+                    drop(guard);
+                    done_tx.send(failures).unwrap();
+                    break;
+                }
+                Err(BimodalArrayError::CouldNotAcquireElementLock) => {
+                    failures += 1;
+                    if !reported_failure {
+                        failed_tx.send(()).unwrap();
+                        reported_failure = true;
+                    }
+                    thread::yield_now();
+                }
+                Err(e) => panic!("unexpected lock error: {e:?}"),
+            }
+        }
+    });
+
+    let mapped = array_handle
+        .lock_map(|x| WithRef { value: &*x })
+        .unwrap();
+    assert_eq!(*mapped.as_ref()[0].value, 7);
+
+    failed_rx.recv().unwrap();
+    drop(mapped);
+
+    let failures = done_rx.recv().unwrap();
+    assert!(failures > 0, "element lock never observed the mapped array lock");
+
+    t.join().unwrap();
+    array_handle.lock().unwrap();
+}
+
+#[test]
 fn contrived_unsupported_length() {
     let data = vec![(); usize::MAX];
     let unsupported_length_error = try_bimodal_array(data);

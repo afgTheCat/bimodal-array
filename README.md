@@ -20,12 +20,15 @@ Handles represent the ability to *attempt* a lock. The actual lock is held by gu
 
 - `ElementHandle::lock()` returns an `ElementGuard<T>`
 - `ArrayHandle::lock()` returns an `ArrayGuard<T>`
+- `ArrayHandle::lock_map()` returns an `ArrayMap<T>`
 
 ### Locking Rules
 
 - Guards for different elements may be held concurrently.
 - An `ArrayGuard<T>` provides exclusive access to the entire array.
 - An `ArrayGuard<T>` cannot coexist with any `ElementGuard<T>`.
+- `ArrayHandle::lock_map()` can build mapped views, including views that borrow
+  from the array, while keeping the array lock held for the returned wrapper.
 - Lock acquisition is non-blocking.
 
 Internally, lock state is coordinated via a single `AtomicUsize`.
@@ -63,4 +66,23 @@ for t in threads {
 // Gather phase
 let mut array_guard = array_handle.lock().unwrap();
 array_guard.sort();
+```
+
+## Mapped Views
+
+`ArrayHandle::lock_map()` is useful when you want to derive a collection of
+views from the array while keeping the array lock held for as long as those
+views exist.
+
+```rust
+use bimodal_array::bimodal_array;
+
+struct View<'a> {
+    value: &'a u32,
+}
+
+let (mut array_handle, _) = bimodal_array(vec![1, 2, 3]);
+let views = array_handle.lock_map(|x| View { value: &*x }).unwrap();
+
+assert_eq!(*views.as_ref()[0].value, 1);
 ```

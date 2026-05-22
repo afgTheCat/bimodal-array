@@ -9,11 +9,15 @@
 //!
 //! 1. when `ElementHandle::lock()` succeeds, it produces an [`ElementGuard<T>`]
 //! 2. when `ArrayHandle::lock()` succeeds, it produces an [`ArrayGuard<T>`].
+//! 3. when [`ArrayHandle::lock_map()`] succeeds, it produces an
+//!    [`ArrayMap<T>`].
 //!
 //! Each [`ElementHandle`] is bound to a specific element. Guards for different
 //! elements may may be held concurrently. An [`ArrayGuard<T>`] provides
 //! exclusive access to the entire array and cannot coexist with any
-//! [`ElementGuard<T>`].
+//! [`ElementGuard<T>`]. [`ArrayHandle::lock_map()`] can be used to derive
+//! reference-carrying views while keeping the array lock held for the returned
+//! mapped wrapper.
 //!
 //! This pattern is useful for scatter–gather style workloads where independent
 //! workers update elements in parallel, followed by an orchestration step that
@@ -311,6 +315,9 @@ impl<'a, T> Drop for ElementGuard<'a, T> {
 /// An `ArrayHandle` represents the capability to acquire an exclusive lock for
 /// the entire collection. The actual lock is held by the returned
 /// [`ArrayGuard`], which provides mutable access to the full slice `&mut [T]`.
+/// It can also produce an [`ArrayMap`] via [`lock_map`](Self::lock_map), which
+/// stores mapped values while keeping the array lock held for the lifetime of
+/// the returned wrapper.
 ///
 /// # Locking Semantics
 ///
@@ -345,6 +352,35 @@ impl<T> ArrayHandle<T> {
             state,
             data_ptr,
             len,
+        })
+    }
+
+    /// Acquires the array-wide lock and maps each element into a new
+    /// collection-backed wrapper.
+    ///
+    /// This method is intended for deriving views that may borrow from the
+    /// underlying array. The array lock remains held until the returned
+    /// [`ArrayMap`] is dropped.
+    ///
+    /// Returns an [`ArrayMap`] on success. If any element guards are currently
+    /// active, this method returns
+    /// [`BimodalArrayError::CouldNotAcquireArrayLock`].
+    pub fn lock_map<'a, S, F: Fn(&'a mut T) -> S>(
+        &'a mut self,
+        mapper: F,
+    ) -> Result<ArrayMap<'a, S>, BimodalArrayError> {
+        let p = self.inner.as_ptr();
+        let state = unsafe { (*p).state.acquire_array_lock()? };
+        let (data_ptr, len, _) = unsafe { (*p).to_raw_parts() };
+        let data = unsafe { slice::from_raw_parts_mut(data_ptr, len) };
+        let data = data
+            .iter_mut()
+            .map(mapper)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Ok(ArrayMap {
+            state,
+            data: Some(data),
         })
     }
 }
@@ -416,6 +452,39 @@ impl<'a, T> AsMut<[T]> for ArrayGuard<'a, T> {
 
 impl<'a, T> Drop for ArrayGuard<'a, T> {
     fn drop(&mut self) {
+        self.state.release_array_lock();
+    }
+}
+
+/// A mapped wrapper returned by [`ArrayHandle::lock_map`].
+///
+/// `ArrayMap` stores mapped values derived from the locked array while keeping
+/// the array-wide lock held for its entire lifetime. This makes it suitable
+/// for reference-carrying views that must not outlive exclusive access to the
+/// underlying array.
+///
+/// The mapped data can be accessed as a slice, but the wrapper does not expose
+/// ownership-transfer operations for the stored values.
+pub struct ArrayMap<'a, T> {
+    state: &'a LockState,
+    data: Option<Box<[T]>>,
+}
+
+impl<'a, T> AsRef<[T]> for ArrayMap<'a, T> {
+    fn as_ref(&self) -> &[T] {
+        self.data.as_deref().unwrap()
+    }
+}
+
+impl<'a, T> AsMut<[T]> for ArrayMap<'a, T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        self.data.as_mut().unwrap()
+    }
+}
+
+impl<'a, T> Drop for ArrayMap<'a, T> {
+    fn drop(&mut self) {
+        drop(self.data.take());
         self.state.release_array_lock();
     }
 }
